@@ -1,0 +1,393 @@
+---
+title: "Preliminary 311 Response Times"
+author: "Nick Solomon"
+date: "10/24/2018"
+output: 
+  bookdown::pdf_book:
+    keep_tex: true
+    toc: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = FALSE)
+
+# Libraries
+library(tidyverse)
+library(leaflet)
+library(lubridate)
+library(janitor)
+library(Rcpp)
+
+# Display setting
+theme_set(theme_bw())
+options(scipen=1, digits=2)
+```
+
+```{r data, cache = TRUE, include = FALSE}
+# Load C++ function
+sourceCpp("find_dups.cpp")
+
+# Read in all 311 data
+dat_311 <- read_csv("311_Service_Requests_from_2010_to_Present.csv") %>% 
+  clean_names()
+
+# Get 2017
+dat_311_17 <- dat_311 %>% 
+  mutate(created_date = mdy_hms(created_date),
+         closed_date = mdy_hms(closed_date)) %>% 
+  filter(year(created_date) == 2017,
+    (!str_detect(tolower(resolution_description), "canceled")) | is.na(resolution_description)) # remove XXXX calls canceled by caller
+
+# window_size <- dat_311_17 %>% 
+#   group_by(date = as.Date(created_date)) %>% 
+#   summarize(n = n()) %>% 
+#   ungroup() %>% 
+#   summarize(mean = mean(n)) %>% 
+#   pull() %>% 
+#   round()
+# 
+calls_2017 <- dat_311_17 %>%
+  arrange(desc(created_date)) %>%
+  drop_na(location, complaint_type) %>% # Remove XXXX calls with missing info
+  mutate(complaint_type = tolower(complaint_type))
+# 
+# dup_id <- find_dups(calls_2017$unique_key, calls_2017$complaint_type, calls_2017$location, window_size)
+# 
+# calls_2017[,"dup_id"] <- dup_id
+
+
+response_times <- calls_2017 %>%
+  group_by(complaint_type) %>%
+  summarize(q75 = quantile(closed_date - created_date, .75, na.rm = TRUE)/60^2/24)
+calls_per_day <- calls_2017 %>% 
+  group_by(day = as.Date(created_date), complaint_type) %>% 
+  summarize(n = n()) %>% 
+  ungroup() %>% 
+  group_by(complaint_type) %>% 
+  summarize(mean = mean(n))
+windows <- response_times %>% 
+  left_join(calls_per_day, by = "complaint_type") %>% 
+  mutate(window = ceiling(as.numeric(q75 * mean)),
+         window = case_when(window < 3 ~ 3,
+                            is.na(window) ~ 3,
+                            TRUE ~ window)) %>% 
+  select(-q75)
+
+calls_2017_2 <- calls_2017 %>% 
+  left_join(windows, by = "complaint_type") %>%
+  group_by(complaint_type) %>% 
+  arrange(desc(created_date)) %>% 
+  mutate(dup_id = find_dups(unique_key, complaint_type, location, unique(window)))
+
+calls_2017_agg <- calls_2017_2 %>%
+  ungroup() %>% 
+  group_by(dup_id) %>%
+  summarize(n = n(),
+            created_date = min(created_date),
+            closed_date = min(closed_date)) %>%
+  mutate(response_time = closed_date - created_date,
+         dup = n > 1) %>% 
+  left_join(calls_2017 %>% 
+              select(location, complaint_type, agency, unique_key),
+            by = c("dup_id" = "unique_key"))
+
+```
+
+```{r}
+response_times90 <- calls_2017 %>%
+  group_by(complaint_type) %>%
+  summarize(q75 = quantile(closed_date - created_date, .9, na.rm = TRUE)/60^2/24)
+
+windows90 <- response_times90 %>% 
+  left_join(calls_per_day, by = "complaint_type") %>% 
+  mutate(window = ceiling(as.numeric(q75 * mean)),
+         window = case_when(window < 3 ~ 3,
+                            is.na(window) ~ 3,
+                            TRUE ~ window)) %>% 
+  select(-q75)
+
+calls_2017_2_90 <- calls_2017 %>% 
+  left_join(windows90, by = "complaint_type") %>%
+  group_by(complaint_type) %>% 
+  arrange(desc(created_date)) %>% 
+  mutate(dup_id = find_dups(unique_key, complaint_type, location, unique(window)))
+
+calls_2017_agg_90 <- calls_2017_2_90 %>%
+  ungroup() %>% 
+  group_by(dup_id) %>%
+  summarize(n = n(),
+            created_date = min(created_date),
+            closed_date = min(closed_date)) %>%
+  mutate(response_time = closed_date - created_date,
+         dup = n > 1) %>% 
+  left_join(calls_2017 %>% 
+              select(location, complaint_type, agency, unique_key),
+            by = c("dup_id" = "unique_key"))
+
+```
+
+
+## Summary
+
+This report contains preliminary findings concerning duplicate 311 calls and response times during the 2017 calendar year. 
+
+## Data
+
+The data analyzed within this report consist of information about 311 calls made during 2017. This dataset contains a record corresponding to each 311 call. This record holds things like the date the complaint was made, the type of complaint, and the location of the incident. This data also contains a feild that holds the date the complaint was closed. This allows us to analyze the response times to different complaints.
+
+## Assumptions and Definitions
+
+The data presented here has been aggregated to the "incident" level. By this we mean that each 311 call reported in the dataset corresponds to an incident requiring attention from a government agency. Multiple calls may report the same incident. For example, if two neighbors both make a noise complaint about a party accross the street. Calls referring to the same incident are identified as duplicates, and aggregated together. We identify calls as duplicates by finding calls reporting the same incident type at the same location within `r window_size` reports of each other. This number was chosen as it is the average number of 311 calls made per day in 2017, and we expect duplicate complaints to happen within one day of each other. Each duplicate is tied to the original call using the original call's unique ID. These "duplicate IDs" are used to aggregate the data.
+
+When calculating response times, we make use of the the Created Date and Closed Date fields for each call. The response time is the difference between these two times. In the case of duplicate calls, when we aggregate to the incident level, the response time is the difference between the earliest Created Date value and the earliest Closed Date value. That is to say, we assume an incident begins as soon as it is reported and is resolved as soon as one call is resolved.
+
+We have also made the choice to exclude a portion of the data from analysis (approximately 14% of 311 calls). This includes calls that were marked as cancelled at the caller's request, calls without a current resolved time, calls in which any of the information required for identifying duplicates was not reported, and calls in which the response time is negative. This was done because without this information, we are not able to calculate response times, so we can not make meaningful statements about these data points.
+
+As a summary of the data excluded, 
+
+
+```{r}
+excluded <- calls_2017_agg %>% 
+  filter(is.na(response_time) | !is.finite(response_time) | response_time <= 0)
+
+(174530 + nrow(excluded))/nrow(calls_2017)
+
+```
+
+
+## Analysis and Results
+
+```{r medresp}
+med_resp <- calls_2017_agg_90 %>% 
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>% # Remove XXXX calls with bad response times
+  group_by(dup) %>% 
+  summarize(`Response Time` = median(as.numeric(response_time))/60^2,
+            `Number of Incidents` = n()) %>%
+  ungroup() %>% 
+  mutate(`Percent of Incidents` = (`Number of Incidents`/sum(`Number of Incidents`))*100) %>% 
+  rename(`Is Duplicated` = dup) 
+
+med_resp %>% 
+  knitr::kable(caption = "Median response time in hours", format.args = list(big.mark = ","), escape = FALSE)
+```
+
+In Table \@ref(tab:medresp) the median response time for incidents with and without duplicate calls is reported, along with the number of each type of incident. Non-duplicate calls are much more common, with duplicates representing only `r med_resp[2, "Percent of Incidents"]`\% of reported incidents. The median reponse time of incidents with duplicate calls is more than twice that of incidents without duplicates.
+
+```{r respcomplaint, dev = "tikz", fig.cap = "The difference in median response time by complaint type.", fig.height = 7}
+by_complaint <- calls_2017_agg %>% 
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>% 
+  group_by(dup, complaint_type) %>% 
+  summarize(med = median(response_time)/60^2, n = n()) %>% 
+  ungroup() %>% 
+  filter(n >= 100) %>% 
+  select(-n) %>% 
+  spread(dup, med) %>% 
+  mutate(diff = `FALSE` - `TRUE`)
+
+by_complaint %>% 
+  mutate(complaint_type = reorder(complaint_type, diff),
+         diff = diff/24/7) %>% 
+  filter(!is.na(diff)) %>% 
+  ggplot(aes(complaint_type, diff)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous() +
+  labs(title = "Median response time by complaint time",
+       subtitle = "Difference in number of weeks",
+       x = "Complaint type",
+       y = "Difference between non-duplicate and duplicate median response times",
+       caption = "For complaint types with more than 100 duplicate and non-duplicate incidents in 2017")
+```
+
+Investigating further, we examine the difference in median response times across different complaint types. In Figure \@ref(fig:respcomplaint) we see that this difference is extremely large in some cases. A positive value indicates that incidents with duplicate calls were solved faster. For one complaint type, the difference is greater than 6 weeks.
+
+```{r respagency, dev = "tikz", fig.cap = "The difference in median response time by agency."}
+by_agency <- calls_2017_agg %>% 
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>%
+  group_by(dup, agency) %>% 
+  summarize(med = median(response_time)/60^2, n = n()) %>%
+  filter(n >=100) %>% 
+  select(-n) %>% 
+  ungroup() %>% 
+  spread(dup, med) %>% 
+  mutate(diff = `FALSE` - `TRUE`)
+
+by_agency %>% 
+  mutate(agency = reorder(agency, diff),
+         diff = diff/24) %>% 
+  filter(!is.na(diff)) %>% 
+  ggplot(aes(agency, diff)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous() +
+  labs(title = "Median response time by agency",
+       subtitle = "Difference in number of days",
+       x = "Agency",
+       y = "Difference between non-duplicate and duplicate median response times",
+       caption = "For agencies with more than 100 duplicate and non-duplicate incidents in 2017")
+```
+
+Similarly, Figure \@ref(fig:respagency) shows the same information at the agency level. Note that here, the differences are much less extreme. They are measured in days, not weeks.
+
+
+## Questions
+
+```{r}
+
+small_calls <- calls_2017_agg %>%
+  # arrange(desc(n), created_date) %>%
+  filter(n > 1) %>%
+  separate(location, into = c("lat", "lon"), sep = ",") %>%
+  mutate(lat = str_remove_all(lat, "\\(|\\)") %>% as.numeric(),
+         lon = str_remove_all(lon, "\\(|\\)") %>% as.numeric())
+
+pal <- colorNumeric("viridis", log(small_calls$n))
+
+small_calls %>%
+  leaflet() %>%
+  addProviderTiles("Stamen.TonerLite") %>%
+  addCircleMarkers(color = ~pal(log(n)), popup = ~paste(complaint_type, n, created_date, sep = "<br>"),
+             clusterOptions = markerClusterOptions()) %>%
+  addLegend(position = "bottomright", pal = pal, values = ~log(n))
+
+library(sf)
+
+options(tigris_class = "sf")
+tracts <- tigris::tracts("NY", year = 2010)
+
+complaint_types <- calls_2017_agg %>% 
+  group_by(complaint_type) %>% 
+  summarize(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  head(10) %>% 
+  pull(complaint_type)
+
+top_complaints <- calls_2017_agg %>% 
+  filter(complaint_type %in% complaint_types) %>% 
+  separate(location, into = c("lat", "lon"), sep = ",") %>%
+  mutate(lat = str_remove_all(lat, "\\(|\\)") %>% as.numeric(),
+         lon = str_remove_all(lon, "\\(|\\)") %>% as.numeric()) %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = st_crs(tracts))
+
+tract_complaints <- tracts %>%
+  st_join(top_complaints, st_contains, left = FALSE) %>% 
+  as.data.frame() %>% 
+  select(-geometry)
+
+
+
+tract_complaints_agg <- tract_complaints %>% 
+  # st_cast("POLYGON") %>% 
+  # st_simplify() %>% 
+  group_by(GEOID10, complaint_type) %>% 
+  summarize(mean = mean(n)) %>% 
+  left_join(tracts, by = "GEOID10") %>% 
+  st_sf() %>%
+  # mutate(mean = ifelse(mean < 5, mean, 5)) %>% 
+  filter(mean < 5)
+
+pal <- colorNumeric("viridis", tract_complaints_agg$mean)
+
+map <- tract_complaints_agg %>%
+  # filter(complaint_type == "noise - residential") %>% 
+  st_transform(crs = "+proj=longlat +datum=WGS84") %>%
+  leaflet() %>% 
+  addProviderTiles("Stamen.TonerLite") %>% 
+  addPolygons(color = ~pal(mean), group = ~complaint_type, stroke = FALSE, fillOpacity = .8) %>% 
+  addLayersControl(baseGroups = ~unique(complaint_type)) %>% 
+  addLegend(position = "bottomright", pal = pal, values = ~mean)
+  
+```
+
+```{r}
+ggplot(calls_2017_agg %>% filter(n > 1, n <=10), aes(n)) + 
+  geom_histogram(aes(y = ..density..),binwidth = 1) + 
+  facet_wrap(~agency) 
+```
+
+```{r}
+
+m1 <- calls_2017_agg %>% 
+  filter(agency == "EDC") %>% 
+  pull(n) %>%
+  unique() %>% 
+  sort()
+
+1:min(length(m1),(which(diff(m1) != 1)[1]), na.rm = TRUE)
+
+min(which(diff(m1) != 1), length(m1))
+
+m2 <- calls_2017_agg %>% 
+  # filter(agency != "HPD") %>% 
+  pull(n) %>%
+  unique() %>%
+  length()
+
+props <- calls_2017_agg %>% 
+  filter(agency != "HPD",n <= 4) %>% 
+  group_by(n) %>% summarize(num = n()) %>% 
+  mutate(prop = num/sum(num)) %>% 
+  pull(prop)
+props_doe <- calls_2017_agg %>% 
+  filter(agency == "DOE") %>% 
+  select(n) %>% 
+  pull() %>% 
+  unique()
+  table()
+
+chisq.test(props_doe, p = props)
+
+run_chi_square <- function(.data, test_agency) {
+  
+  cat(test_agency, "\n")
+  m1 <- .data %>% 
+    filter(agency == test_agency) %>% 
+    pull(n) %>%
+    unique() %>% 
+    sort()
+  
+  m1 <- min(length(m1),(which(diff(m1) != 1)[1]), na.rm = TRUE, 10)
+  
+  m2 <- .data %>% 
+    filter(agency != test_agency) %>% 
+    pull(n) %>%
+    unique() %>% 
+    sort()
+  
+  m2 <- min(length(m2),(which(diff(m2) != 1)[1]), na.rm = TRUE, 10)
+  
+  m <- min(m1, m2)
+  cat(m, "\n")
+  
+  # if (m <= 1){ return(NA)}
+  
+  agency_counts <- .data %>%
+    filter(agency == agency, n <= m) %>%
+    select(n) %>%
+    table()
+
+  overall_props <- .data %>%
+    filter(agency != test_agency, n <= m) %>%
+    group_by(n) %>%
+    summarize(num = n()) %>%
+    mutate(prop = num/sum(num)) %>% 
+    pull(prop)
+  
+  # sim <- any(sum(agency_counts)*overall_props <= 5)
+  # cat(sim, "\n")
+  
+  chisq.test(agency_counts, p = overall_props) %>%
+    broom::tidy() %>% 
+    mutate(agency = test_agency)
+}
+
+tests <- map_df(unique(calls_2017_agg$agency), ~run_chi_square(calls_2017_agg, .x))
+
+tests %>% 
+  filter(p.value <= .05/nrow(.)) %>% 
+  arrange(p.value)
+```
+
