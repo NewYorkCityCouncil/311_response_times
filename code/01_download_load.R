@@ -1,7 +1,7 @@
 
 filename <- "data/original_data/311_Service_Requests_from_2010_to_Present.csv"
 
-if(! filename %in% list.files("data/original_data/", full.names = TRUE)) {
+if(! filename %in% list.files("data/original_data", full.names = TRUE)) {
   download.file(url = "https://data.cityofnewyork.us/api/views/erm2-nwe9/rows.csv?accessType=DOWNLOAD", destfile = filename)
 }
 

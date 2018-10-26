@@ -12,10 +12,11 @@ editor_options:
 
 ```{r setup, include=FALSE}
 # knitr options
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
 knitr::opts_chunk$set(echo = FALSE)
 
-# Libraries
-
+# Libraries etc.
+source("code/00_setup.R")
 
 # Display setting
 theme_set(theme_bw())
@@ -23,7 +24,6 @@ options(scipen=1, digits=2)
 ```
 
 ```{r data, cache = TRUE, include = FALSE}
-source("code/00_setup.R")
 source("code/01_download_load.R")
 source("code/02_wrangle.R")
 ```
@@ -75,14 +75,14 @@ med_resp %>%
 In Table \@ref(tab:medresp) the median response time for incidents with and without duplicate calls is reported, along with the number of each type of incident. Non-duplicate calls are much more common, with duplicates representing only `r med_resp[2, "Percent of Incidents"]`\% of reported incidents. The median reponse time of incidents with duplicate calls is more than twice that of incidents without duplicates.
 
 ```{r respcomplaint, dev = "tikz", fig.cap = "The difference in median response time by complaint type.", fig.height = 7}
-by_complaint <- calls_2017_agg %>% 
-  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>% 
-  group_by(dup, complaint_type) %>% 
-  summarize(med = median(response_time)/60^2, n = n()) %>% 
-  ungroup() %>% 
-  filter(n >= 100) %>% 
-  select(-n) %>% 
-  spread(dup, med) %>% 
+by_complaint <- calls_2017_agg %>%
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>%
+  group_by(dup, complaint_type) %>%
+  summarize(med = median(response_time)/60^2, n = n()) %>%
+  ungroup() %>%
+  filter(n >= 100) %>%
+  select(-n) %>%
+  spread(dup, med) %>%
   mutate(diff = `FALSE` - `TRUE`)
 
 by_complaint %>% 
@@ -98,6 +98,72 @@ by_complaint %>%
        x = "Complaint type",
        y = "Difference between non-duplicate and duplicate median response times",
        caption = "For complaint types with more than 100 duplicate and non-duplicate incidents in 2017")
+
+complaint_types <- calls_2017_agg %>% 
+  group_by(complaint_type) %>% 
+  summarize(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  head(10) %>% 
+  pull(complaint_type)
+
+by_complaint2 <- calls_2017_agg %>%
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0, complaint_type %in% complaint_types) %>%
+  group_by(dup, complaint_type) %>%
+  summarize(med = median(response_time)/60^2, n = n())# %>%
+  # ungroup() %>%
+  # filter(n >= 100) %>%
+  # select(-n) %>%
+  # spread(dup, med) %>%
+  # mutate(diff = `FALSE` - `TRUE`)
+
+
+by_complaint2 %>% 
+  # mutate(complaint_type = reorder(complaint_type, diff),
+  #        diff = diff/24/7) %>% 
+  # filter(!is.na(diff)) %>% 
+  ggplot(aes(complaint_type, med, fill = dup)) +
+  geom_col(position = "dodge") +
+  # coord_flip() +
+  # scale_y_continuous() +
+  # labs(title = "Median response time by complaint time",
+  #      subtitle = "Difference in number of weeks",
+  #      x = "Complaint type",
+  #      y = "Difference between non-duplicate and duplicate median response times",
+  #      caption = "For complaint types with more than 100 duplicate and non-duplicate incidents in 2017") 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Top 10 complaint types")
+
+by_complaint3 <- calls_2017_agg %>%
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>%
+  group_by(dup, complaint_type) %>%
+  summarize(med = median(response_time)/60^2, n = n()) %>%
+  ungroup() %>%
+  filter(n >= 100) %>%
+  select(-n) %>%
+  spread(dup, med) %>%
+  mutate(diff = `FALSE` - `TRUE`) %>% 
+  arrange(desc(diff)) %>% 
+  head(10) %>% 
+  mutate(complaint_type = reorder(complaint_type, diff)) %>% 
+  select(-diff) %>% 
+  gather(key = "dup", value = "med", `FALSE`, `TRUE`)
+
+by_complaint3 %>% 
+  # mutate(complaint_type = reorder(complaint_type, diff),
+  #        diff = diff/24/7) %>% 
+  # filter(!is.na(diff)) %>% 
+  ggplot(aes(complaint_type, med, fill = dup)) +
+  geom_col(position = "dodge") +
+  # coord_flip() +
+  # scale_y_continuous() +
+  # labs(title = "Median response time by complaint time",
+  #      subtitle = "Difference in number of weeks",
+  #      x = "Complaint type",
+  #      y = "Difference between non-duplicate and duplicate median response times",
+  #      caption = "For complaint types with more than 100 duplicate and non-duplicate incidents in 2017")
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Top 10 differences in response time")
+
 ```
 
 Investigating further, we examine the difference in median response times across different complaint types. In Figure \@ref(fig:respcomplaint) we see that this difference is extremely large in some cases. A positive value indicates that incidents with duplicate calls were solved faster. For one complaint type, the difference is greater than 6 weeks.
@@ -119,6 +185,30 @@ by_agency %>%
   filter(!is.na(diff)) %>% 
   ggplot(aes(agency, diff)) +
   geom_col() +
+  coord_flip() +
+  scale_y_continuous() +
+  labs(title = "Median response time by agency",
+       subtitle = "Difference in number of days",
+       x = "Agency",
+       y = "Difference between non-duplicate and duplicate median response times",
+       caption = "For agencies with more than 100 duplicate and non-duplicate incidents in 2017")
+
+by_agency2<- calls_2017_agg %>% 
+  filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>%
+  group_by(dup, agency) %>% 
+  summarize(med = median(response_time)/60^2, n = n()) %>%
+  filter(n >=100) %>% 
+  select(-n) #%>% 
+  # ungroup() %>% 
+  # spread(dup, med) %>% 
+  # mutate(diff = `FALSE` - `TRUE`)
+
+by_agency2 %>% 
+  # mutate(agency = reorder(agency, diff),
+  #        diff = diff/24) %>% 
+  # filter(!is.na(diff)) %>% 
+  ggplot(aes(agency, med, fill = dup)) +
+  geom_col(position = "dodge") +
   coord_flip() +
   scale_y_continuous() +
   labs(title = "Median response time by agency",

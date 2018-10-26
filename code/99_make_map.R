@@ -1,21 +1,21 @@
 library(leaflet)
 
 
-small_calls <- calls_2017_agg %>%
-  # arrange(desc(n), created_date) %>%
-  filter(n > 1) %>%
-  separate(location, into = c("lat", "lon"), sep = ",") %>%
-  mutate(lat = str_remove_all(lat, "\\(|\\)") %>% as.numeric(),
-         lon = str_remove_all(lon, "\\(|\\)") %>% as.numeric())
-
-pal <- colorNumeric("viridis", log(small_calls$n))
-
-small_calls %>%
-  leaflet() %>%
-  addProviderTiles("Stamen.TonerLite") %>%
-  addCircleMarkers(color = ~pal(log(n)), popup = ~paste(complaint_type, n, created_date, sep = "<br>"),
-                   clusterOptions = markerClusterOptions()) %>%
-  addLegend(position = "bottomright", pal = pal, values = ~log(n))
+# small_calls <- calls_2017_agg %>%
+#   # arrange(desc(n), created_date) %>%
+#   filter(n > 1) %>%
+#   separate(location, into = c("lat", "lon"), sep = ",") %>%
+#   mutate(lat = str_remove_all(lat, "\\(|\\)") %>% as.numeric(),
+#          lon = str_remove_all(lon, "\\(|\\)") %>% as.numeric())
+# 
+# pal <- colorNumeric("RdGr", log(small_calls$n))
+# 
+# small_calls %>%
+#   leaflet() %>%
+#   addProviderTiles("Stamen.TonerLite") %>%
+#   addCircleMarkers(color = ~pal(log(n)), popup = ~paste(complaint_type, n, created_date, sep = "<br>"),
+#                    clusterOptions = markerClusterOptions()) %>%
+#   addLegend(position = "bottomright", pal = pal, values = ~log(n))
 
 library(sf)
 
@@ -53,7 +53,7 @@ tract_complaints_agg <- tract_complaints %>%
   # mutate(mean = ifelse(mean < 5, mean, 5)) %>% 
   filter(mean < 5)
 
-pal <- colorNumeric("viridis", tract_complaints_agg$mean)
+pal <- colorNumeric("RdYlGn", tract_complaints_agg$mean)
 
 map <- tract_complaints_agg %>%
   # filter(complaint_type == "noise - residential") %>% 
