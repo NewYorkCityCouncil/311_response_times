@@ -57,14 +57,29 @@ if(! all(c(unagg_filename, agg_filename) %in% list.files("data/processed_data", 
               resolutions = list(resolution_description)) %>%
     mutate(response_time = closed_date - created_date,
            dup = n > 1) %>% 
-    left_join(calls_2017 %>% 
+    left_join(calls_2017_2 %>% 
                 select(location, complaint_type, agency, unique_key),
               by = c("dup_id" = "unique_key"))
   
+  num_included <- calls_2017_agg %>% 
+    filter(!is.na(response_time), is.finite(response_time), response_time > 0) %>% 
+    select(resolutions) %>% 
+    ungroup() %>% 
+    unnest() %>% 
+    nrow()
+  num_total <- dat_311 %>% 
+    mutate(created_date = mdy_hms(created_date),
+           closed_date = mdy_hms(closed_date)) %>% 
+    filter(year(created_date) == 2017) %>% 
+    nrow()
+  perc_missing <- 1 - (num_included/num_total)
+  
   save(calls_2017_2, file = unagg_filename)
   save(calls_2017_agg, file = agg_filename)
+  save(perc_missing, file = "data/processed_data/perc_missing.RData")
   
 } else {
   load(unagg_filename)
   load(agg_filename)
+  load("data/processed_data/perc_missing.RData")
 }
