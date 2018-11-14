@@ -289,15 +289,15 @@ Next, in Figure \@ref(fig:respagency) we plot the difference in median response 
 #   summarize(n = n()) %>% 
 #   mutate(perc = n/sum(n))
 
-conf_mat <- calls_2017_2 %>%
-  ungroup() %>%
-  mutate(real_dup = str_detect(tolower(resolution_description), "duplicate"),
-         dup = dup_id != unique_key) %>%
-  select(dup, real_dup) %>%
-  table()
-
-(precision <- conf_mat[2,2]/(conf_mat[2,2] + conf_mat[2,1]))
-(recall <- conf_mat[2,2]/(conf_mat[2,2] + conf_mat[1,2]))
+# conf_mat <- calls_2017_2 %>%
+#   ungroup() %>%
+#   mutate(real_dup = str_detect(tolower(resolution_description), "duplicate"),
+#          dup = dup_id != unique_key) %>%
+#   select(dup, real_dup) %>%
+#   table()
+# 
+# (precision <- conf_mat[2,2]/(conf_mat[2,2] + conf_mat[2,1]))
+# (recall <- conf_mat[2,2]/(conf_mat[2,2] + conf_mat[1,2]))
 ```
 
 ```{r}
